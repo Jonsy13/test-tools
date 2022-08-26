@@ -2,10 +2,11 @@ package server
 
 import (
 	"errors"
-	"github.com/miekg/dns"
-	log "github.com/sirupsen/logrus"
 	"strings"
 	"time"
+
+	"github.com/miekg/dns"
+	log "github.com/sirupsen/logrus"
 )
 
 // DNSInterceptor instance helps create a dns server that intercepts dns requests and injects chaos
@@ -20,14 +21,20 @@ type DNSInterceptor struct {
 
 // NewDNSInterceptor creates a new instance of the DNSInterceptor and updates the resolv.conf to point to the interceptor
 func NewDNSInterceptor(resolvConfPath, upstreamServer string) (*DNSInterceptor, error) {
+	var original string
 	conf, err := dns.ClientConfigFromFile(resolvConfPath)
 	if err != nil {
 		return nil, errors.New("failed to get resolv.conf : " + err.Error())
 	}
+
 	if upstreamServer == "" {
 		for _, srv := range conf.Servers {
 			if checkValidUpstream(srv) {
 				upstreamServer = srv
+				original, err = updateResolvConf(resolvConfPath, nil)
+				if err != nil {
+					return nil, errors.New("failed to inject interceptor in resolv.conf : " + err.Error())
+				}
 				break
 			}
 		}
@@ -35,15 +42,12 @@ func NewDNSInterceptor(resolvConfPath, upstreamServer string) (*DNSInterceptor, 
 			log.Fatal("Failed to get a valid upstream server address, add a custom UPSTREAM_SERVER")
 		}
 	}
+
 	log.WithField("server", upstreamServer+":"+DefaultDNSPort).Info("Upstream DNS Server")
+
 	settings, err := getInterceptorSettings()
 	if err != nil {
 		return nil, err
-	}
-
-	original, err := updateResolvConf(resolvConfPath, nil)
-	if err != nil {
-		return nil, errors.New("failed to inject interceptor in resolv.conf : " + err.Error())
 	}
 
 	return &DNSInterceptor{
@@ -71,12 +75,12 @@ func (d *DNSInterceptor) Serve(pattern, port string) {
 
 // Shutdown is responsible for clean up, it stops the dns interceptor and recovers the resolv.conf to original state
 func (d *DNSInterceptor) Shutdown() {
-	_, err := updateResolvConf(d.configPath, &d.originalConfig)
-	if err != nil {
-		log.WithError(err).Error("Failed to recover original resolv.conf")
-	}
+	// _, err := updateResolvConf(d.configPath, &d.originalConfig)
+	// if err != nil {
+	// 	log.WithError(err).Error("Failed to recover original resolv.conf")
+	// }
 	if d.server != nil {
-		err = d.server.Shutdown()
+		err := d.server.Shutdown()
 		if err != nil {
 			log.WithError(err).Error("Failed to to shutdown interceptor")
 		}
